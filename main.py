@@ -2,6 +2,7 @@ from telebot import types
 import telebot
 import string
 import random
+import datetime
 from abc import ABC, abstractmethod
 
 
@@ -18,6 +19,8 @@ definitions = ["lemon", "phone", "cup"]
 class Player:
     def __init__(self, name, id, points=0):
         self.__in_lobby = False
+        self.__guessing_word = False
+        self.__word = ""
         self.__id = id
         self.__name = name
         self.__points = points
@@ -51,6 +54,20 @@ class Player:
     @is_in_lobby.setter
     def is_in_lobby(self, in_lobby):
         self.__in_lobby = in_lobby
+
+    @property
+    def is_guessing_word(self):
+        return self.__guessing_word
+
+    @is_guessing_word.setter
+    def is_guessing_word(self, guessing_word):
+        self.__guessing_word = guessing_word
+
+    def get_word(self):
+        return self.__word
+
+    def set_word(self, word):
+        self.__word = word
 
     def get_id(self):
         return self.__id
@@ -138,15 +155,24 @@ class Guessword(Lobby, Game):
     def __init__(self, name, people_amount=0, time=0):
         self.__word = ""
         self.__hints = []
+        self.__winner_id = 0
+        self.__is_winner = False
         super().__init__(name, people_amount=0, time=0)
 
     def start_game(self):
         pass
 
-    def is_winner(self, word):
-        if self.__word == word:
-            return True
-        return False
+    def change_is_winner(self):
+        self.__is_winner = True
+
+    def is_winner(self):
+        return self.__is_winner
+
+    def set_winner(self, id):
+        self.__winner_id = id
+
+    def get_winner(self):
+        return self.__winner_id
 
     def get_word(self):
         return self.__word
@@ -184,10 +210,7 @@ class Encyclopedia(Lobby, Game):
 
 
 def lobby_name():
-    name = []
-    for i in string.ascii_lowercase:
-        if random.randint(0, 5) == 3:
-            name.append(i)
+    name = [string.ascii_lowercase[random.randint(0, 25)] for i in range(5)]
     random.shuffle(name)
     return ''.join(name)
 
@@ -217,7 +240,7 @@ def lobby_text():
             if isinstance(player, Admin):
                 if player.get_name_lobby() == lobby.get_name():
                     txt += "Lobby name: " + lobby.get_name() + "\nPeople " + str(len(lobby.get_ides())) + " / " + str(lobby.people_amount) + \
-                           "\nTime - " + str(lobby.time_game) + " min"
+                           "\nTime for one hint - " + str(lobby.time_game) + " sec"
     return txt
 
 
@@ -247,15 +270,13 @@ class Bot:
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "lobby menu")
         def lobby_menu(call):
-            try:
-                self.bot.delete_message(call.message.chat.id, call.message.message_id)
-                key = types.InlineKeyboardMarkup()
-                but_1 = types.InlineKeyboardButton(text="Update", callback_data="lobby menu")
-                key.add(but_1)
-                txt = lobby_text()
-                self.bot.send_message(call.from_user.id, "Please wait for the admin to start the game.\n" + txt, reply_markup=key)
-            except Exception:
-                pass
+            self.bot.delete_message(call.message.chat.id, call.message.message_id)
+            key = types.InlineKeyboardMarkup()
+            but_1 = types.InlineKeyboardButton(text="Update", callback_data="lobby menu")
+            key.add(but_1)
+            txt = lobby_text()
+            self.bot.send_message(call.from_user.id, "Please wait for the admin to start the game.\n" + txt,
+                                  reply_markup=key)
 
         @self.bot.message_handler(commands=[""])
         def lobby_menu(message):
@@ -287,14 +308,34 @@ class Bot:
         @self.bot.callback_query_handler(func=lambda call: call.data == "start game")
         def start_game(call):
             for player in players:
-                for lobby in lobbies:
-                    if player.get_name_lobby() == lobby.get_name():
-                        lobby.random_word()
+                for game in lobbies:
+                    if player.get_name_lobby() == game.get_name():
+                        game.random_word()
+                        now = datetime.datetime.now()
+                        now_sec = now.second
+                        hints = game.get_hints()
+                        counter = 0
+                        for pl in players:
+                            pl.is_guessing_word = True
                         while True:
-                            for pl in lobby.get_ides():
-                                self.bot.send_message(pl, "TEST")
-
-            self.bot.send_message(call.from_user.id)
+                            is_time = datetime.datetime.now()
+                            is_time_sec = is_time.second
+                            if (is_time_sec - now_sec) > game.time_game and counter < len(hints) - 1:
+                                for pl in game.get_ides():
+                                    self.bot.send_message(pl, hints[counter])
+                                counter += 1
+                                now = datetime.datetime.now()
+                                now_sec = now.second
+                            elif (is_time_sec - now_sec) < 0:
+                                now = datetime.datetime.now()
+                                now_sec = now.second
+                                is_time = datetime.datetime.now()
+                                is_time_sec = is_time.second
+                            if game.is_winner():
+                                for pl in game.get_ides():
+                                    self.bot.send_message(pl, "Winner is " + str(game.get_winner()))
+                                break
+                        break
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "Guess the word")
         def game_guess_word(call):
@@ -321,7 +362,7 @@ class Bot:
                                 if message.text.isdigit():
                                     lobby.people_amount = int(message.text)
                                     lobby.add_id(message.from_user.id)
-                                    self.bot.send_message(message.from_user.id, "Input time in the minutes")
+                                    self.bot.send_message(message.from_user.id, "Input time for one hint (advised is 10-20)")
                                     player.change_status_people()
                                     player.change_status_time()
                                 else:
@@ -342,7 +383,6 @@ class Bot:
                         exist = False
                         for lobby in lobbies:
                             if lobby.get_name() == message.text:
-                                self.bot.send_message(message.from_user.id, "Good")
                                 lobby.add_id(message.from_user.id)
                                 player.is_in_lobby = True
                                 exist = True
@@ -350,6 +390,17 @@ class Bot:
                         if not exist:
                             self.bot.send_message(message.from_user.id, "There is no such lobby")
                             start(message)
+
+                    elif player.is_guessing_word:
+                        for lobby in lobbies:
+                            if message.from_user.id in lobby.get_ides():
+                                player.set_word(message.text)
+                                if message.text == lobby.get_word():
+                                    self.bot.send_message(message.from_user.id, "Right")
+                                    lobby.set_winner(message.from_user.id)
+                                    lobby.change_is_winner()
+                                else:
+                                    self.bot.send_message(message.from_user.id, "Wrong")
 
     def start(self):
         self.bot.polling()
