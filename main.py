@@ -4,9 +4,14 @@ import string
 import random
 from abc import ABC, abstractmethod
 
+
 lobbies = []
 players = []
-words = ["Albert Einstein", "apple", "pen"]
+words = ["apple", "pen"]
+all_hints = {"apple": ["It is fruit", "It grows on trees", "It can be yellow, green, red color", "It is company with the such name"],
+             "pen": ["U can write by this", "It costs 1 buck"]}
+
+
 definitions = ["lemon", "phone", "cup"]
 
 
@@ -124,27 +129,39 @@ class Game(ABC):
     def random_word(self):
         pass
 
+    @abstractmethod
+    def get_word(self):
+        pass
+
 
 class Guessword(Lobby, Game):
     def __init__(self, name, people_amount=0, time=0):
-        self.word = ""
+        self.__word = ""
+        self.__hints = []
         super().__init__(name, people_amount=0, time=0)
 
     def start_game(self):
         pass
 
     def is_winner(self, word):
-        if self.word == word:
+        if self.__word == word:
             return True
         return False
 
+    def get_word(self):
+        return self.__word
+
+    def get_hints(self):
+        return self.__hints
+
     def random_word(self):
-        self.word = words[random.randint(0, len(words) - 1)]
+        self.__word = words[random.randint(0, len(words) - 1)]
+        self.__hints = all_hints[self.__word]
 
 
 class Encyclopedia(Lobby, Game):
     def __init__(self, name, people_amount=0, time=0):
-        self.definition = ""
+        self.__definition = ""
         super().__init__(name, people_amount=0, time=0)
 
     def start_game(self):
@@ -159,8 +176,11 @@ class Encyclopedia(Lobby, Game):
                 id_player = player.get_id()
         return max_points, id_player
 
+    def get_word(self):
+        return self.__definition
+
     def random_word(self):
-        self.definition = definitions[random.randint(0, len(definitions) - 1)]
+        self.__definition = definitions[random.randint(0, len(definitions) - 1)]
 
 
 def lobby_name():
@@ -190,8 +210,7 @@ def start_buttons():
     return key
 
 
-def admin_lobby_buttons():
-    key = types.InlineKeyboardMarkup()
+def lobby_text():
     txt = ""
     for player in players:
         for lobby in lobbies:
@@ -199,11 +218,7 @@ def admin_lobby_buttons():
                 if player.get_name_lobby() == lobby.get_name():
                     txt += "Lobby name: " + lobby.get_name() + "\nPeople " + str(len(lobby.get_ides())) + " / " + str(lobby.people_amount) + \
                            "\nTime - " + str(lobby.time_game) + " min"
-
-    but_1 = types.InlineKeyboardButton(text="Start game", callback_data="start game")
-    but_2 = types.InlineKeyboardButton(text="Update", callback_data="admin lobby menu")
-    key.add(but_1, but_2)
-    return key, txt
+    return txt
 
 
 class Bot:
@@ -232,29 +247,54 @@ class Bot:
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "lobby menu")
         def lobby_menu(call):
-            key = types.InlineKeyboardMarkup()
-            txt = ""
-            for player in players:
-                for lobby in lobbies:
-                    if player.get_name_lobby() == lobby.get_name():
-                        txt += "People " + str(len(lobby.get_ides())) + " / " + str(lobby.people_amount) + \
-                               "\nTime - " + str(lobby.time_game) + " min"
+            try:
+                self.bot.delete_message(call.message.chat.id, call.message.message_id)
+                key = types.InlineKeyboardMarkup()
+                but_1 = types.InlineKeyboardButton(text="Update", callback_data="lobby menu")
+                key.add(but_1)
+                txt = lobby_text()
+                self.bot.send_message(call.from_user.id, "Please wait for the admin to start the game.\n" + txt, reply_markup=key)
+            except Exception:
+                pass
 
-            but_1 = types.InlineKeyboardButton(text="Start game", callback_data="start game")
-            but_2 = types.InlineKeyboardButton(text="Update", callback_data="admin lobby menu")
-            key.add(but_1, but_2)
-            self.bot.send_message(call.from_user.id, "You are in lobby\n" + txt, reply_markup=key)
+        @self.bot.message_handler(commands=[""])
+        def lobby_menu(message):
+            key = types.InlineKeyboardMarkup()
+            but_1 = types.InlineKeyboardButton(text="Update", callback_data="lobby menu")
+            key.add(but_1)
+            txt = lobby_text()
+            self.bot.send_message(message.chat.id, "Please wait for the admin to start the game.\n" + txt, reply_markup=key)
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "admin lobby menu")
         def admin_lobby_menu(call):
             self.bot.delete_message(call.message.chat.id, call.message.message_id)
-            key, txt = admin_lobby_buttons()
-            self.bot.send_message(call.from_user.id, "You are in lobby\n" + txt, reply_markup=key)
+            txt = lobby_text()
+            key = types.InlineKeyboardMarkup()
+            but_1 = types.InlineKeyboardButton(text="Update", callback_data="admin lobby menu")
+            but_2 = types.InlineKeyboardButton(text="Start game", callback_data="start game")
+            key.add(but_1, but_2)
+            self.bot.send_message(call.from_user.id, txt, reply_markup=key)
 
         @self.bot.message_handler(commands=[""])
         def admin_lobby_menu(message):
-            key, txt = admin_lobby_buttons()
-            self.bot.send_message(message.chat.id, "You are in lobby\n" + txt, reply_markup=key)
+            txt = lobby_text()
+            key = types.InlineKeyboardMarkup()
+            but_1 = types.InlineKeyboardButton(text="Update", callback_data="admin lobby menu")
+            but_2 = types.InlineKeyboardButton(text="Start game", callback_data="start game")
+            key.add(but_1, but_2)
+            self.bot.send_message(message.chat.id, txt, reply_markup=key)
+
+        @self.bot.callback_query_handler(func=lambda call: call.data == "start game")
+        def start_game(call):
+            for player in players:
+                for lobby in lobbies:
+                    if player.get_name_lobby() == lobby.get_name():
+                        lobby.random_word()
+                        while True:
+                            for pl in lobby.get_ides():
+                                self.bot.send_message(pl, "TEST")
+
+            self.bot.send_message(call.from_user.id)
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "Guess the word")
         def game_guess_word(call):
@@ -302,12 +342,11 @@ class Bot:
                         exist = False
                         for lobby in lobbies:
                             if lobby.get_name() == message.text:
-                                print(player.is_in_lobby)
                                 self.bot.send_message(message.from_user.id, "Good")
                                 lobby.add_id(message.from_user.id)
                                 player.is_in_lobby = True
-                                print(player.is_in_lobby)
                                 exist = True
+                                lobby_menu(message)
                         if not exist:
                             self.bot.send_message(message.from_user.id, "There is no such lobby")
                             start(message)
