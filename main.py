@@ -3,16 +3,17 @@ import telebot
 import string
 import random
 import datetime
+import time
 from abc import ABC, abstractmethod
 
 
 lobbies = []
 players = []
-words = ["apple", "pen"]
+words = ["apple", "usa"]
 all_hints = {"apple": ["It is fruit", "It grows on trees", "It can be yellow, green, red color",
                        "There is company with the such name"],
-             "pen": ["U can write by this", "It costs 1 buck"]}
-
+             "usa": ["It is a country", "Independence Day is celebrated on July 4", "Country name is an abbreviation",
+                     "It borders on Canada, Mexico and Russia"]}
 
 definitions = ["lemon", "phone", "cup"]
 
@@ -226,27 +227,8 @@ def add_user(id, name, lobby_name=None, choice=None):
         players.append(Admin(lobby_name, name, id))
 
 
-def start_buttons():
-    key = types.InlineKeyboardMarkup()
-    but_1 = types.InlineKeyboardButton(text="Create lobby", callback_data="type lobby")
-    but_2 = types.InlineKeyboardButton(text="Join lobby", callback_data="Join lobby")
-    key.add(but_1, but_2)
-    return key
-
-
-def lobby_text():
-    txt = ""
-    for player in players:
-        for lobby in lobbies:
-            if isinstance(player, Admin):
-                if player.get_name_lobby() == lobby.get_name():
-                    txt += "Lobby name: " + lobby.get_name() + "\nPeople " + str(len(lobby.get_ides())) + " / " + str(lobby.people_amount) + \
-                           "\nTime for one hint - " + str(lobby.time_game) + " sec"
-    return txt
-
-
 class TimeNotInRangeError(Exception):
-    def __init__(self, time, message="is not in range 10-30"):
+    def __init__(self, time, message="is not in range"):
         self.time = time
         self.message = message
         super().__init__(self.message)
@@ -256,17 +238,37 @@ class TimeNotInRangeError(Exception):
 
 
 class Bot:
+    @staticmethod
+    def lobby_text():
+        txt = ""
+        for player in players:
+            for lobby in lobbies:
+                if isinstance(player, Admin):
+                    if player.get_name_lobby() == lobby.get_name():
+                        txt += "Lobby name: " + lobby.get_name() + "\nPeople " + str(
+                            len(lobby.get_ides())) + " / " + str(lobby.people_amount) + \
+                               "\nTime for one hint - " + str(lobby.time_game) + " sec"
+        return txt
+
+    @staticmethod
+    def start_buttons():
+        key = types.InlineKeyboardMarkup()
+        but_1 = types.InlineKeyboardButton(text="Create lobby", callback_data="type lobby")
+        but_2 = types.InlineKeyboardButton(text="Join lobby", callback_data="Join lobby")
+        key.add(but_1, but_2)
+        return key
+
     def __init__(self, token):
         self.bot = telebot.TeleBot(token=token)
 
         @self.bot.message_handler(commands=["start"])
         def start(message):
-            self.bot.send_message(message.chat.id, "Choose action", reply_markup=start_buttons())
+            self.bot.send_message(message.chat.id, "Choose action", reply_markup=self.start_buttons())
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "start")
         def start_callback(call):
             self.bot.delete_message(call.message.chat.id, call.message.message_id)
-            self.bot.send_message(call.from_user.id, "Choose action", reply_markup=start_buttons())
+            self.bot.send_message(call.from_user.id, "Choose action", reply_markup=self.start_buttons())
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "type lobby")
         def type_lobby(call):
@@ -285,7 +287,7 @@ class Bot:
             key = types.InlineKeyboardMarkup()
             but_1 = types.InlineKeyboardButton(text="Update", callback_data="lobby menu")
             key.add(but_1)
-            txt = lobby_text()
+            txt = self.lobby_text()
             self.bot.send_message(call.from_user.id, "Please wait for the admin to start the game.\n" + txt,
                                   reply_markup=key)
 
@@ -294,13 +296,13 @@ class Bot:
             key = types.InlineKeyboardMarkup()
             but_1 = types.InlineKeyboardButton(text="Update", callback_data="lobby menu")
             key.add(but_1)
-            txt = lobby_text()
+            txt = self.lobby_text()
             self.bot.send_message(message.chat.id, "Please wait for the admin to start the game.\n" + txt, reply_markup=key)
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "admin lobby menu")
         def admin_lobby_menu(call):
             self.bot.delete_message(call.message.chat.id, call.message.message_id)
-            txt = lobby_text()
+            txt = self.lobby_text()
             key = types.InlineKeyboardMarkup()
             but_1 = types.InlineKeyboardButton(text="Update", callback_data="admin lobby menu")
             but_2 = types.InlineKeyboardButton(text="Start game", callback_data="start game")
@@ -309,7 +311,7 @@ class Bot:
 
         @self.bot.message_handler(commands=[""])
         def admin_lobby_menu(message):
-            txt = lobby_text()
+            txt = self.lobby_text()
             key = types.InlineKeyboardMarkup()
             but_1 = types.InlineKeyboardButton(text="Update", callback_data="admin lobby menu")
             but_2 = types.InlineKeyboardButton(text="Start game", callback_data="start game")
@@ -318,6 +320,7 @@ class Bot:
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "start game")
         def start_game(call):
+            self.bot.delete_message(call.message.chat.id, call.message.message_id)
             for player in players:
                 for game in lobbies:
                     if isinstance(player, Admin):
@@ -359,7 +362,7 @@ class Bot:
             name = lobby_name()
             lobbies.append(Guessword(name))
             add_user(call.from_user.id, call.message.chat.username, name, 1)
-            self.bot.send_message(call.from_user.id, "Input amount of people", reply_markup=key)
+            self.bot.send_message(call.from_user.id, "Input amount of people 2-100", reply_markup=key)
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "Join lobby")
         def join_lobby(call):
@@ -375,11 +378,17 @@ class Bot:
                         for lobby in lobbies:
                             if player.get_name_lobby() == lobby.get_name():
                                 if message.text.isdigit():
-                                    lobby.people_amount = int(message.text)
-                                    lobby.add_id(message.from_user.id)
-                                    self.bot.send_message(message.from_user.id, "Input time for one hint 10-30")
-                                    player.change_status_people()
-                                    player.change_status_time()
+                                    try:
+                                        if 2 <= int(message.text) <= 100:
+                                            lobby.people_amount = int(message.text)
+                                            lobby.add_id(message.from_user.id)
+                                            self.bot.send_message(message.from_user.id, "Input time for one hint 10-30")
+                                            player.change_status_people()
+                                            player.change_status_time()
+                                        else:
+                                            raise TimeNotInRangeError(int(message.text))
+                                    except TimeNotInRangeError as e:
+                                        self.bot.send_message(message.from_user.id, e)
                                 else:
                                     self.bot.send_message(message.from_user.id, "Not correct form")
 
@@ -388,7 +397,7 @@ class Bot:
                             if player.get_name_lobby() == lobby.get_name():
                                 if message.text.isdigit():
                                     try:
-                                        if 10 < int(message.text) < 30:
+                                        if 10 <= int(message.text) <= 30:
                                             lobby.time_game = int(message.text)
                                             player.change_status_time()
                                             player.is_in_lobby = True
@@ -430,7 +439,10 @@ class Bot:
 
 
 if __name__ == "__main__":
-    bot = Bot("1319075806:AAEdpZth2FhpI_Us7eQ8vRO6Vl51LAcrvFo")
-    bot.start()
-
-    
+    while True:
+        try:
+            bot = Bot("1319075806:AAEdpZth2FhpI_Us7eQ8vRO6Vl51LAcrvFo")
+            bot.start()
+        except Exception as e:
+            print(e)
+            time.sleep(15)
