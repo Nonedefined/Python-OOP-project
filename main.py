@@ -4,18 +4,84 @@ import string
 import random
 import datetime
 import time
+import json
+import os
 from abc import ABC, abstractmethod
 
 
 lobbies = []
 players = []
-words = ["apple", "usa"]
-all_hints = {"apple": ["It is fruit", "It grows on trees", "It can be yellow, green, red color",
-                       "There is company with the such name"],
-             "usa": ["It is a country", "Independence Day is celebrated on July 4", "Country name is an abbreviation",
-                     "It borders on Canada, Mexico and Russia"]}
 
 definitions = ["lemon", "phone", "cup"]
+
+
+class SingleTone:
+    __instance = None
+
+    def __new__(cls, val):
+        if SingleTone.__instance is None:
+            SingleTone.__instance = object.__new__(cls)
+        SingleTone.__instance.val = val
+        return SingleTone.__instance
+
+
+class DataBase:
+    def __init__(self, location):
+        self.location = os.path.expanduser(location)
+        self.__db = {}
+        self.load(self.location)
+
+    def load(self, location):
+        if os.path.exists(location):
+            self._load()
+        else:
+            self.__db = {}
+        return True
+
+    def _load(self):
+        self.__db = json.load(open(self.location, "r"))
+
+    def dump_db(self):
+        try:
+            json.dump(self.__db, open(self.location, "w+"))
+            return True
+        except Exception as e:
+            print(e)
+            return False
+
+    def add(self, key, value):
+        try:
+            self.__db[str(key)] = value
+            self.dump_db()
+        except Exception as e:
+            print(e)
+            return False
+
+    def get_by_key(self, key):
+        try:
+            return self.__db[key]
+        except KeyError:
+            print("No value can be found for " + str(key))
+            return False
+
+    def get_all(self):
+        try:
+            return self.__db
+        except Exception as e:
+            print(e)
+            return False
+
+    def delete_by_key(self, key):
+        if not (key in self.__db):
+            return False
+        del self.__db[key]
+        self.dump_db()
+        return True
+
+
+my_db = DataBase("words_db.db")
+all_hints = my_db.get_all()
+keys = list(all_hints.keys())
 
 
 class Player:
@@ -125,21 +191,14 @@ class Lobby(ABC):
         return self.__name
 
     def add_id(self, id_player):
-        if isinstance(id_player, int):
-            self.__ides.append(id_player)
-            self.__ides = list(set(self.__ides))
-        else:
-            raise ValueError("Id must be int type")
+        self.__ides.append(id_player)
+        self.__ides = list(set(self.__ides))
 
     def get_ides(self):
         return self.__ides
 
 
 class Game(ABC):
-    @abstractmethod
-    def start_game(self):
-        pass
-
     @abstractmethod
     def is_winner(self, *args):
         pass
@@ -161,9 +220,6 @@ class Guessword(Lobby, Game):
         self.__is_winner = False
         super().__init__(name, people_amount=0, time=0)
 
-    def start_game(self):
-        pass
-
     def change_is_winner(self):
         self.__is_winner = True
 
@@ -183,7 +239,7 @@ class Guessword(Lobby, Game):
         return self.__hints
 
     def random_word(self):
-        self.__word = words[random.randint(0, len(words) - 1)]
+        self.__word = keys[random.randint(0, len(keys) - 1)]
         self.__hints = all_hints[self.__word]
 
 
@@ -191,9 +247,6 @@ class Encyclopedia(Lobby, Game):
     def __init__(self, name, people_amount=0, time=0):
         self.__definition = ""
         super().__init__(name, people_amount=0, time=0)
-
-    def start_game(self):
-        pass
 
     def is_winner(self, players_with_points):
         max_points = 0
@@ -212,7 +265,7 @@ class Encyclopedia(Lobby, Game):
 
 
 def lobby_name():
-    name = [string.ascii_lowercase[random.randint(0, 25)] for i in range(5)]
+    name = [string.ascii_lowercase[random.randint(0, 25)] for _ in range(5)]
     random.shuffle(name)
     return ''.join(name)
 
@@ -227,17 +280,17 @@ def add_user(id, name, lobby_name=None, choice=None):
         players.append(Admin(lobby_name, name, id))
 
 
-class TimeNotInRangeError(Exception):
-    def __init__(self, time, message="is not in range"):
-        self.time = time
+class ValueNotInRangeError(Exception):
+    def __init__(self, value, message="is not in range"):
+        self.value = value
         self.message = message
         super().__init__(self.message)
 
     def __str__(self):
-        return f'{self.time} {self.message}'
+        return f'{self.value} {self.message}'
 
 
-class Bot:
+class Bot(SingleTone):
     @staticmethod
     def lobby_text():
         txt = ""
@@ -333,7 +386,8 @@ class Bot:
                             for pl in players:
                                 if pl.get_id() in game.get_ides():
                                     pl.is_guessing_word = True
-                            while True:
+                            is_winner = False
+                            while not is_winner:
                                 is_time = datetime.datetime.now()
                                 is_time_sec = is_time.second
                                 if (is_time_sec - now_sec) > game.time_game and counter < len(hints):
@@ -351,9 +405,10 @@ class Bot:
                                     for pl in players:
                                         if pl.get_id() in game.get_ides():
                                             pl.is_guessing_word = True
-                                            self.bot.send_message(pl.get_id(), f"We have a [winner](tg://user?id={str(game.get_winner())})", parse_mode='Markdown')
+                                            self.bot.send_message(pl.get_id(), f"We have a [winner](tg://user?id="
+                                                                               f"{str(game.get_winner())})", parse_mode='Markdown')
                                     lobbies.remove(game)
-                                    break
+                                    is_winner = True
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "Guess the word")
         def game_guess_word(call):
@@ -386,8 +441,8 @@ class Bot:
                                             player.change_status_people()
                                             player.change_status_time()
                                         else:
-                                            raise TimeNotInRangeError(int(message.text))
-                                    except TimeNotInRangeError as e:
+                                            raise ValueNotInRangeError(int(message.text))
+                                    except ValueNotInRangeError as e:
                                         self.bot.send_message(message.from_user.id, e)
                                 else:
                                     self.bot.send_message(message.from_user.id, "Not correct form")
@@ -403,8 +458,8 @@ class Bot:
                                             player.is_in_lobby = True
                                             admin_lobby_menu(message)
                                         else:
-                                            raise TimeNotInRangeError(int(message.text))
-                                    except TimeNotInRangeError as e:
+                                            raise ValueNotInRangeError(int(message.text))
+                                    except ValueNotInRangeError as e:
                                         self.bot.send_message(message.from_user.id, e)
 
                                 else:
@@ -443,6 +498,7 @@ if __name__ == "__main__":
         try:
             bot = Bot("1319075806:AAEdpZth2FhpI_Us7eQ8vRO6Vl51LAcrvFo")
             bot.start()
+
         except Exception as e:
             print(e)
             time.sleep(15)
