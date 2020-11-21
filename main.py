@@ -496,7 +496,7 @@ class Bot(SingleTone):
 if __name__ == "__main__":
     while True:
         try:
-            bot = Bot("1319075806:AAEdpZth2FhpI_Us7eQ8vRO6Vl51LAcrvFo")
+            bot = Bot("")
             bot.start()
 
         except Exception as e:
